@@ -140,9 +140,10 @@ export default function Home() {
     };
 
     recognition.onend = () => {
-      const text = transcript || "";
-      // Use the latest transcript from the closure
       recognitionRef.current = null;
+      // If recognition ended without going through our useEffect flow,
+      // reset to idle (e.g. user said nothing)
+      setState((prev) => (prev === "listening" ? "idle" : prev));
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
@@ -170,7 +171,7 @@ export default function Home() {
         } else {
           setState("idle");
         }
-      }, 1500);
+      }, 1200);
 
       return () => clearTimeout(timer);
     }
