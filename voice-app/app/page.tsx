@@ -12,7 +12,7 @@ interface Message {
 const SYSTEM_MESSAGE: Message = {
   role: "system",
   content:
-    "You are TowerMind, the AI concierge for Frontier Tower. Keep voice responses concise — 2-3 sentences max. Be warm and direct. People are talking to you out loud at a hackathon.",
+    "You are TowerMind, the AI concierge for Frontier Tower. Keep voice responses concise — 2-3 sentences max. Be warm and direct. People are talking to you out loud at a hackathon. Do NOT use markdown, bullet points, or emojis — you are speaking out loud.",
 };
 
 export default function Home() {
@@ -22,44 +22,91 @@ export default function Home() {
   const [error, setError] = useState("");
   const messagesRef = useRef<Message[]>([SYSTEM_MESSAGE]);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
   const [supported, setSupported] = useState(true);
+  const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const ttsUnlockedRef = useRef(false);
+  const pendingResponseRef = useRef<string | null>(null);
 
+  // Load voices
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
     if (
-      typeof window !== "undefined" &&
       !("webkitSpeechRecognition" in window) &&
       !("SpeechRecognition" in window)
     ) {
       setSupported(false);
+      return;
     }
+
+    const pickVoice = () => {
+      const voices = window.speechSynthesis.getVoices();
+      const preferred = voices.find(
+        (v) =>
+          v.name.includes("Samantha") ||
+          v.name.includes("Google US English") ||
+          v.name.includes("Karen") ||
+          (v.lang.startsWith("en") && v.name.includes("Female"))
+      );
+      voiceRef.current = preferred || voices.find((v) => v.lang.startsWith("en")) || null;
+    };
+
+    pickVoice();
+    window.speechSynthesis.onvoiceschanged = pickVoice;
   }, []);
 
+  // Speak text aloud — must be called after TTS is unlocked
   const speak = useCallback((text: string) => {
+    // Strip markdown formatting for clean speech
+    const clean = text
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/\*([^*]+)\*/g, "$1")
+      .replace(/#{1,6}\s/g, "")
+      .replace(/[-•]\s/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+
     setState("speaking");
     window.speechSynthesis.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(text);
+    const utterance = new SpeechSynthesisUtterance(clean);
     utterance.rate = 1.05;
     utterance.pitch = 1;
-
-    // Try to pick a good voice
-    const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(
-      (v) =>
-        v.name.includes("Samantha") ||
-        v.name.includes("Karen") ||
-        v.name.includes("Google US English") ||
-        (v.lang.startsWith("en") && v.name.includes("Female"))
-    );
-    if (preferred) utterance.voice = preferred;
+    if (voiceRef.current) utterance.voice = voiceRef.current;
 
     utterance.onend = () => setState("idle");
     utterance.onerror = () => setState("idle");
 
-    synthRef.current = utterance;
     window.speechSynthesis.speak(utterance);
+
+    // Chrome bug: long utterances pause and never resume
+    // Keep-alive interval pokes the synthesis queue
+    const keepAlive = setInterval(() => {
+      if (!window.speechSynthesis.speaking) {
+        clearInterval(keepAlive);
+        return;
+      }
+      window.speechSynthesis.pause();
+      window.speechSynthesis.resume();
+    }, 10000);
+
+    utterance.onend = () => {
+      clearInterval(keepAlive);
+      setState("idle");
+    };
+    utterance.onerror = () => {
+      clearInterval(keepAlive);
+      setState("idle");
+    };
   }, []);
+
+  // Watch for pending responses that need to be spoken after TTS unlock
+  useEffect(() => {
+    if (ttsUnlockedRef.current && pendingResponseRef.current) {
+      const text = pendingResponseRef.current;
+      pendingResponseRef.current = null;
+      speak(text);
+    }
+  });
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -86,7 +133,15 @@ export default function Home() {
 
         messagesRef.current.push({ role: "assistant", content: reply });
         setResponse(reply);
-        speak(reply);
+
+        // Try to speak directly — if TTS was unlocked it will work
+        if (ttsUnlockedRef.current) {
+          speak(reply);
+        } else {
+          // Store for later — user will need to tap to hear
+          pendingResponseRef.current = reply;
+          setState("idle");
+        }
       } catch (err) {
         console.error(err);
         setError("Connection error. Tap to try again.");
@@ -97,6 +152,21 @@ export default function Home() {
   );
 
   const startListening = useCallback(() => {
+    // CRITICAL: Unlock TTS on user gesture by speaking empty utterance
+    if (!ttsUnlockedRef.current) {
+      const unlock = new SpeechSynthesisUtterance("");
+      window.speechSynthesis.speak(unlock);
+      ttsUnlockedRef.current = true;
+    }
+
+    // If there's a pending response, speak it now (user tapped)
+    if (pendingResponseRef.current) {
+      const text = pendingResponseRef.current;
+      pendingResponseRef.current = null;
+      speak(text);
+      return;
+    }
+
     if (state === "speaking") {
       window.speechSynthesis.cancel();
       setState("idle");
@@ -141,8 +211,6 @@ export default function Home() {
 
     recognition.onend = () => {
       recognitionRef.current = null;
-      // If recognition ended without going through our useEffect flow,
-      // reset to idle (e.g. user said nothing)
       setState((prev) => (prev === "listening" ? "idle" : prev));
     };
 
@@ -156,7 +224,7 @@ export default function Home() {
 
     recognitionRef.current = recognition;
     recognition.start();
-  }, [state, transcript]);
+  }, [state, speak]);
 
   // Handle final transcript and send message
   useEffect(() => {
@@ -181,7 +249,7 @@ export default function Home() {
     idle: "Tap to speak",
     listening: "Listening...",
     thinking: "Thinking...",
-    speaking: "Speaking — tap to stop",
+    speaking: "Tap to stop",
   };
 
   if (!supported) {
@@ -231,9 +299,7 @@ export default function Home() {
       {response && <p className="response-text">{response}</p>}
 
       {/* Error */}
-      {error && (
-        <p className="text-sm text-red-400">{error}</p>
-      )}
+      {error && <p className="text-sm text-red-400">{error}</p>}
 
       {/* Footer */}
       <p className="fixed bottom-6 text-xs text-[var(--text-dim)]">
