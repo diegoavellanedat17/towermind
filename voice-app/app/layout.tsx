@@ -1,16 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-});
-
 export const metadata: Metadata = {
-  title: "TowerMind — Frontier Tower AI",
+  title: "TowerMind — Frontier Tower Voice Agent",
   description:
-    "Voice-enabled AI concierge for Frontier Tower, 995 Market St, San Francisco",
+    "AI concierge voice agent for Frontier Tower, 995 Market St, San Francisco",
 };
 
 export const viewport: Viewport = {
@@ -18,7 +12,23 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: "#000000",
+  themeColor: "#030303",
+};
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "VoiceApplication",
+  name: "TowerMind",
+  description: "AI concierge voice agent for Frontier Tower",
+  url: "https://towermind.thexperiment.dev",
+  location: {
+    "@type": "Place",
+    name: "Frontier Tower",
+    address: "995 Market St, San Francisco, CA",
+  },
+  availableLanguage: "en",
+  applicationCategory: "Voice Agent",
+  provider: { "@type": "Organization", name: "The Experiment" },
 };
 
 export default function RootLayout({
@@ -27,8 +37,29 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.variable}>
-      <body className="font-[var(--font-inter)]">{children}</body>
+    <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          rel="preconnect"
+          href="https://fonts.gstatic.com"
+          crossOrigin="anonymous"
+        />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap"
+          rel="stylesheet"
+        />
+        <meta name="agent:type" content="voice-concierge" />
+        <meta name="agent:capabilities" content="floor-navigation,event-query,people-lookup,real-time-status" />
+        <meta name="agent:protocol" content="voice-first" />
+        <meta name="agent:stack" content="elevenlabs,claude-sonnet" />
+        <meta name="agent:version" content="2030.1" />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
+      </head>
+      <body>{children}</body>
     </html>
   );
 }
